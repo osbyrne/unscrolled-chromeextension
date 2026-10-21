@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Unscrolled</title>
+    <script type="module" src="./main.ts"></script>
+  </head>
+  <body>
+    <header><img class="mark" src="../../assets/logo.webp" alt="" width="42" height="56" /><span>Unscrolled</span><span class="dot" aria-hidden="true"></span></header>
+    <main>
+      <p class="eyebrow">A little less scroll.</p>
+      <h1>Make room<br />for your focus.</h1>
+      <p class="intro">Choose where your X feed ends.</p>
+      <form id="limit-form">
+        <label for="post-limit">Your post limit</label>
+        <div class="number-field">
+          <input id="post-limit" name="postLimit" type="number" min="1" max="999" step="1" required inputmode="numeric" aria-describedby="limit-hint" disabled />
+          <span>posts / visit</span>
+        </div>
+        <p id="limit-hint" class="hint">Pick a number from 1 to 999.</p>
+        <button type="submit" disabled>Save &amp; reload X <span aria-hidden="true">↗</span></button>
+        <p id="status" role="status" aria-live="polite">Loading your limit…</p>
+      </form>
+    </main>
+    <footer>A stopping point. A fresh start.</footer>
+  </body>
+</html>
