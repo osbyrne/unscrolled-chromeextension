@@ -13,6 +13,18 @@ const settle = async () => { await new Promise(resolve => setTimeout(resolve, 0)
 const visible = () => [...document.querySelectorAll('article')].filter(a => !a.closest('[data-unscrolled-hidden]'));
 
 describe('post limit feed boundary', () => {
+  it('uses durable admissions rather than granting a fresh allowance', async () => {
+    mount(Array.from({length: 5}, (_, i) => post(i + 1)).join(''));
+    stop = startLimiter(document, 3, async () => ['1', '2', '99']);
+    await settle();
+    expect(visible()).toHaveLength(2);
+    expect(document.querySelectorAll('footer')).toHaveLength(1);
+    stop();
+    stop = startLimiter(document, 3, async () => ['1', '2', '99']);
+    await settle();
+    expect(visible()).toHaveLength(2);
+  });
+
   it.each([1, 15, 999])('places the footer after a custom limit of %s posts', limit => {
     mount(Array.from({length: limit + 2}, (_, i) => post(i + 1)).join(''));
     stop = startLimiter(document, limit);

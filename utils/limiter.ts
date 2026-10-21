@@ -21,9 +21,12 @@ interface Boundary {
 }
 
 /** Keep X's virtualizer measurements intact; only clip its painted output. */
-export function startLimiter(doc: Document, limit = POST_LIMIT): () => void {
+export function startLimiter(doc: Document, limit = POST_LIMIT, authorize?: (ids: string[]) => Promise<string[]>): () => void {
   const win = doc.defaultView!;
   const admitted = new Set<string>();
+  const checked = new Set<string>();
+  let requesting = false;
+  let retryTimer: ReturnType<typeof setTimeout> | undefined;
   const boundaries = new Map<HTMLElement, Boundary>();
   const style = doc.createElement('style');
   style.textContent = `
@@ -142,6 +145,7 @@ export function startLimiter(doc: Document, limit = POST_LIMIT): () => void {
     const articles = doc.querySelectorAll<HTMLElement>(
       '[data-testid="primaryColumn"] article[data-testid="tweet"]',
     );
+    const candidates = new Set<string>();
     for (const article of articles) {
       const href = article.querySelector('time')?.closest('a')?.getAttribute('href');
       const id = href?.match(/\/status\/(\d+)/)?.[1];
@@ -149,11 +153,30 @@ export function startLimiter(doc: Document, limit = POST_LIMIT): () => void {
       const cell = article.closest<HTMLElement>('[data-testid="cellInnerDiv"]') ?? article;
       const timeline = cell.parentElement;
       if (!timeline) continue;
-      if (!admitted.has(id) && admitted.size < limit) admitted.add(id);
+      if (!authorize && !admitted.has(id) && admitted.size < limit) admitted.add(id);
+      if (authorize && !checked.has(id)) {
+        candidates.add(id);
+        hidden.add(cell);
+        continue;
+      }
       if (!admitted.has(id)) {
         hidden.add(cell);
         if (!rejected.has(timeline)) rejected.set(timeline, cell);
       }
+    }
+    if (authorize && candidates.size && !requesting) {
+      requesting = true;
+      const batch = [...candidates];
+      void authorize(batch).then(ids => {
+        if (stopped) return;
+        for (const id of ids) admitted.add(id);
+        for (const id of batch) checked.add(id);
+        requesting = false;
+        scan();
+      }).catch(() => {
+        requesting = false;
+        if (!stopped) retryTimer = setTimeout(scan, 1000);
+      });
     }
     // Diff attributes instead of unhiding and rehiding all rows on every scan.
     for (const node of doc.querySelectorAll(`[${HIDDEN}]`)) {
@@ -178,6 +201,7 @@ export function startLimiter(doc: Document, limit = POST_LIMIT): () => void {
   scan();
   return () => {
     stopped = true;
+    clearTimeout(retryTimer);
     observer.disconnect();
     resizeObserver.disconnect();
     for (const state of boundaries.values()) restore(state);
