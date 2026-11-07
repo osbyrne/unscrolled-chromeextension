@@ -32,39 +32,39 @@ describe('post limit feed boundary', () => {
     expect(document.querySelector('footer p')?.textContent).toBe(
       `you've seen ${limit} ${limit === 1 ? 'post' : 'posts'}, it's time to focus now.`,
     );
-    expect(document.querySelector('footer small')?.textContent).toBe(`Unscrolled · ${limit} / ${limit}`);
+    expect(document.querySelector('footer')?.textContent).not.toContain('Unscrolled ·');
   });
 
-  it('preserves exactly 100 posts and replaces the remaining cells with one footer', () => {
-    const timeline = mount(Array.from({length: 110}, (_, i) => post(i + 1)).join(''));
+  it('preserves exactly 50 posts and replaces the remaining cells with one footer', () => {
+    const timeline = mount(Array.from({length: 60}, (_, i) => post(i + 1)).join(''));
     stop = startLimiter(document);
-    expect(visible()).toHaveLength(100);
+    expect(visible()).toHaveLength(50);
     expect(document.querySelectorAll('footer')).toHaveLength(1);
     expect(document.querySelector('footer p')?.textContent).toBe(MESSAGE);
     expect(timeline.querySelector('footer')).toBeNull();
     expect(timeline.nextElementSibling?.tagName).toBe('FOOTER');
-    expect(timeline.children).toHaveLength(110);
+    expect(timeline.children).toHaveLength(60);
   });
 
   it('remembers removed posts, allows duplicates, and blocks newly appended posts', async () => {
-    const timeline = mount(Array.from({length: 100}, (_, i) => post(i + 1)).join(''));
+    const timeline = mount(Array.from({length: 50}, (_, i) => post(i + 1)).join(''));
     stop = startLimiter(document);
-    timeline.innerHTML = post(99) + post(100) + post(101);
+    timeline.innerHTML = post(49) + post(50) + post(51);
     await settle();
     expect(visible()).toHaveLength(2);
-    timeline.insertAdjacentHTML('beforeend', post(102));
+    timeline.insertAdjacentHTML('beforeend', post(52));
     await settle();
     expect(visible()).toHaveLength(2);
     expect(document.querySelectorAll('footer')).toHaveLength(1);
   });
 
   it('handles SPA timeline replacement and recycled cell identities', async () => {
-    const timeline = mount(Array.from({length: 100}, (_, i) => post(i + 1)).join(''));
+    const timeline = mount(Array.from({length: 50}, (_, i) => post(i + 1)).join(''));
     stop = startLimiter(document);
-    timeline.outerHTML = `<div id="timeline">${post(100)}${post(101)}</div>`;
+    timeline.outerHTML = `<div id="timeline">${post(50)}${post(51)}</div>`;
     await settle();
     expect(visible()).toHaveLength(1);
-    document.querySelector('a')!.setAttribute('href', '/person/status/102');
+    document.querySelector('a')!.setAttribute('href', '/person/status/52');
     await settle();
     expect(visible()).toHaveLength(0);
   });

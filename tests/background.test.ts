@@ -3,6 +3,8 @@ const api = vi.hoisted(() => ({
   storage: { local: { get: vi.fn(), set: vi.fn() } },
   runtime: { onMessage: { addListener: vi.fn() }, onStartup: { addListener: vi.fn() }, onInstalled: { addListener: vi.fn() } },
   alarms: { create: vi.fn(), onAlarm: { addListener: vi.fn() } },
+  webNavigation: { onHistoryStateUpdated: { addListener: vi.fn() } },
+  tabs: { update: vi.fn() },
 }));
 vi.mock('wxt/browser', () => ({ browser: api }));
 vi.mock('wxt/utils/define-background', () => ({ defineBackground: (main: () => void) => main }));
@@ -41,6 +43,18 @@ describe('shared counter writer', () => {
     expect(await admit(['4', '5'])).toEqual({ ids: ['1', '2', '3'] });
     expect(api.alarms.create).toHaveBeenCalledWith('daily-reset', expect.objectContaining({ when: expect.any(Number) }));
   });
+  it('shares Instagram admissions across tabs independently of X', async () => {
+    const instagramAdmit = (ids: string[]) => new Promise<{ ids: string[] }>(resolve => {
+      handle({ type: 'unscrolled:admit', ids }, { url: 'https://www.instagram.com/?variant=following' }, resolve);
+    });
+    await admit(['1', '2', '3']);
+    const results = await Promise.all([instagramAdmit(['10', '20']), instagramAdmit(['20', '30', '40'])]);
+    expect(results[0].ids).toEqual(['10', '20']);
+    expect(results[1].ids).toEqual(['10', '20', '30']);
+    expect(saved.dailyCounter).toEqual({ day: expect.any(String), ids: ['1', '2', '3'] });
+    expect(saved.instagramDailyCounter).toEqual({ day: expect.any(String), ids: ['10', '20', '30'] });
+  });
+
   it('retains the counter after the service worker restarts', async () => {
     await admit(['1', '2']);
     const { default: main } = await import('../entrypoints/background');
