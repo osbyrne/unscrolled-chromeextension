@@ -1,55 +1,51 @@
 import { browser } from 'wxt/browser';
 import { defineContentScript } from 'wxt/utils/define-content-script';
 import { startLimiter } from '../utils/limiter';
-import { DAILY_COUNTER_KEY, localDay, nextMidnight } from '../utils/daily-counter';
-import {
-  INSTAGRAM_LIMIT_STORAGE_KEY, LEGACY_LIMIT_STORAGE_KEY, readPostLimit, X_LIMIT_STORAGE_KEY,
-} from '../utils/settings';
+import { LIMIT_PAUSE_KEY, readLimitPauseUntil } from '../utils/limit-pause';
 
-import { INSTAGRAM_COUNTER_KEY, instagramPostId, instagramRedirect, isInstagramFollowing } from '../utils/instagram';
+import { instagramRedirect, isInstagramFollowing } from '../utils/instagram';
 
 export default defineContentScript({
   matches: ['https://x.com/*', 'https://www.x.com/*', 'https://instagram.com/*', 'https://www.instagram.com/*'],
   runAt: 'document_start',
   async main(ctx) {
     const instagram = location.hostname.endsWith('instagram.com');
-    const counterKey = instagram ? INSTAGRAM_COUNTER_KEY : DAILY_COUNTER_KEY;
-    const limitKey = instagram ? INSTAGRAM_LIMIT_STORAGE_KEY : X_LIMIT_STORAGE_KEY;
     let stop: (() => void) | undefined;
     let timer: ReturnType<typeof setTimeout>;
-    let day = localDay();
+    let pausedUntil = 0;
     let generation = 0;
     async function restart() {
       const current = ++generation;
-      stop?.();
-      stop = undefined;
       clearTimeout(timer);
-      if (!instagram && /^\/i\/history(?:\/|$)/.test(location.pathname)) return;
+      pausedUntil = 0;
       if (instagram) {
         const redirect = instagramRedirect(location.href);
         if (redirect) { location.replace(redirect); return; }
-        if (!isInstagramFollowing(location.href)) return;
       }
-      const settings = await browser.storage.local.get([limitKey, LEGACY_LIMIT_STORAGE_KEY]);
+      if (instagram ? !isInstagramFollowing(location.href) : /^\/i\/history(?:\/|$)/.test(location.pathname)) {
+        stop?.();
+        stop = undefined;
+        return;
+      }
+      stop ??= startLimiter(document, instagram ? 'instagram' : 'x');
+      const settings = await browser.storage.local.get(LIMIT_PAUSE_KEY).catch(() => undefined);
       if (ctx.isInvalid || current !== generation) return;
-      day = localDay();
-      stop = startLimiter(document, readPostLimit(settings[limitKey], settings[LEGACY_LIMIT_STORAGE_KEY]), async ids => {
-        const result = await browser.runtime.sendMessage({ type: 'unscrolled:admit', ids });
-        if (!Array.isArray(result?.ids)) throw new Error('Daily counter unavailable');
-        return result.ids;
-      }, instagram ? instagramPostId : undefined);
-      clearTimeout(timer);
-      timer = setTimeout(() => { void restart(); }, Math.max(1, nextMidnight() - Date.now()));
+      pausedUntil = readLimitPauseUntil(settings?.[LIMIT_PAUSE_KEY]);
+      if (pausedUntil > Date.now()) {
+        stop();
+        stop = undefined;
+        timer = setTimeout(() => { void restart(); }, pausedUntil - Date.now());
+        return;
+      }
+      pausedUntil = 0;
     }
     const onStorage = (changes: Record<string, { newValue?: unknown }>, area: string) => {
-      if (area !== 'local') return;
-      const counter = changes[counterKey]?.newValue as { day?: string } | undefined;
-      if (changes[limitKey] || changes[LEGACY_LIMIT_STORAGE_KEY] || (counter?.day && counter.day !== day)) void restart();
+      if (area === 'local' && changes[LIMIT_PAUSE_KEY]) void restart();
     };
     browser.storage.onChanged.addListener(onStorage);
     ctx.addEventListener(window, 'wxt:locationchange', () => { void restart(); });
     ctx.addEventListener(document, 'visibilitychange', () => {
-      if (!document.hidden && localDay() !== day) void restart();
+      if (!document.hidden && pausedUntil > 0 && pausedUntil <= Date.now()) void restart();
     });
     ctx.onInvalidated(() => {
       generation++;

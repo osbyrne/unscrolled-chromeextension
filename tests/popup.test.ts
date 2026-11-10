@@ -3,116 +3,167 @@ import { readFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const api = vi.hoisted(() => ({
-  storage: { local: { get: vi.fn(), set: vi.fn() } },
-  tabs: { query: vi.fn(), reload: vi.fn() },
+  storage: { local: { get: vi.fn(), set: vi.fn() }, onChanged: { addListener: vi.fn(), removeListener: vi.fn() } },
 }));
 vi.mock('wxt/browser', () => ({ browser: api }));
 const markup = readFileSync('entrypoints/popup/index.html', 'utf8');
 const settle = () => new Promise(resolve => setTimeout(resolve, 0));
-const input = (site: 'x' | 'instagram' = 'x') => document.querySelector<HTMLInputElement>(`form[data-site="${site}"] input`)!;
-const status = (site: 'x' | 'instagram' = 'x') => document.querySelector<HTMLElement>(`form[data-site="${site}"] [role="status"]`)!;
-const leaveInput = async (value: string, site: 'x' | 'instagram' = 'x') => {
-  input(site).focus();
-  input(site).value = value;
-  input(site).blur();
+const pauseButton = () => document.querySelector<HTMLButtonElement>('#pause-limits')!;
+const mountPopup = async () => {
+  window.dispatchEvent(new Event('pagehide'));
+  vi.resetModules();
+  document.body.innerHTML = markup.match(/<body>([\s\S]*)<\/body>/)![1]!;
+  await import('../entrypoints/popup/main');
   await settle();
 };
 beforeEach(async () => {
   vi.resetModules();
   vi.resetAllMocks();
-  api.storage.local.get.mockResolvedValue({ xPostLimit: 42 });
+  api.storage.local.get.mockResolvedValue({});
   api.storage.local.set.mockResolvedValue(undefined);
-  api.tabs.query.mockResolvedValue([{ id: 7, url: 'https://x.com/home' }]);
-  api.tabs.reload.mockResolvedValue(undefined);
-  document.body.innerHTML = markup.match(/<body>([\s\S]*)<\/body>/)![1]!;
-  await import('../entrypoints/popup/main');
-  await settle();
+  await mountPopup();
 });
-afterEach(() => { document.body.innerHTML = ''; });
+afterEach(() => {
+  window.dispatchEvent(new Event('pagehide'));
+  vi.useRealTimers();
+  document.body.innerHTML = '';
+});
 
-describe('post limit popup', () => {
-  it('loads the saved limit and saves before reloading the active X tab', async () => {
-    expect(input().value).toBe('42');
-    await leaveInput('15');
-    expect(api.storage.local.set).toHaveBeenCalledWith({ xPostLimit: 15 });
-    expect(api.tabs.reload).toHaveBeenCalledWith(7);
-    expect(api.storage.local.set.mock.invocationCallOrder[0]).toBeLessThan(api.tabs.reload.mock.invocationCallOrder[0]!);
+describe('three-minute pause toggle', () => {
+  it('shows the pause control without count selectors or daily reset copy', () => {
+    expect(pauseButton().textContent).toBe('Pause limits for 3 minutes');
+    expect(document.querySelector('input, select, form')).toBeNull();
+    expect(document.body.textContent).not.toContain('midnight');
   });
-  it.each(['', '0', '51', '1.5', '-4'])('does not save or reload invalid value %s', async value => {
-    await leaveInput(value);
+  it('waits six seconds before pausing for three minutes and can resume early', async () => {
+    vi.useFakeTimers();
+    const now = Date.now();
+    pauseButton().click();
+    expect(pauseButton().textContent).toBe('Cancel pause (6s)');
+    expect(pauseButton().getAttribute('aria-pressed')).toBe('false');
+    await vi.advanceTimersByTimeAsync(5999);
     expect(api.storage.local.set).not.toHaveBeenCalled();
-    expect(api.tabs.reload).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(api.storage.local.set).toHaveBeenLastCalledWith({ postLimitsPausedUntil: now + 6000 + 180_000 });
+    expect(pauseButton().getAttribute('aria-pressed')).toBe('true');
+    expect(pauseButton().textContent).toBe('Resume limits now');
+    expect(document.querySelector('#pause-status')?.textContent).toContain('3:00 on X and Instagram');
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(document.querySelector('#pause-status')?.textContent).toContain('2:59');
+    pauseButton().click();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(api.storage.local.set).toHaveBeenLastCalledWith({ postLimitsPausedUntil: 0 });
+    expect(pauseButton().getAttribute('aria-pressed')).toBe('false');
   });
-  it.each(['1', '50'])('accepts boundary value %s', async value => {
-    await leaveInput(value);
-    expect(api.storage.local.set).toHaveBeenCalledWith({ xPostLimit: Number(value) });
-    expect(api.tabs.reload).toHaveBeenCalledOnce();
+
+  it('loads the original expiry when reopened', async () => {
+    api.storage.local.get.mockResolvedValue({ postLimitsPausedUntil: Date.now() + 60_000 });
+    await mountPopup();
+    expect(pauseButton().getAttribute('aria-pressed')).toBe('true');
+    expect(document.querySelector('#pause-status')?.textContent).toContain('1:00');
   });
-  it('saves without reloading an unrelated active page', async () => {
-    api.tabs.query.mockResolvedValue([{ id: 7, url: 'https://example.com/' }]);
-    await leaveInput('30');
-    expect(api.storage.local.set).toHaveBeenCalledWith({ xPostLimit: 30 });
-    expect(api.tabs.reload).not.toHaveBeenCalled();
-    expect(status().hidden).toBe(true);
+
+  it('turns off automatically when the countdown expires', async () => {
+    vi.useFakeTimers();
+    pauseButton().click();
+    await vi.advanceTimersByTimeAsync(6000 + 179_999);
+    expect(pauseButton().getAttribute('aria-pressed')).toBe('true');
+    await vi.advanceTimersByTimeAsync(1);
+    expect(pauseButton().getAttribute('aria-pressed')).toBe('false');
+    expect(pauseButton().textContent).toBe('Pause limits for 3 minutes');
   });
-  it('does not reload if saving fails, and allows a retry', async () => {
+
+  it('updates the countdown when another popup changes the pause', async () => {
+    const onStorage = api.storage.onChanged.addListener.mock.calls.at(-1)![0];
+    onStorage({ postLimitsPausedUntil: { newValue: Date.now() + 180_000 } }, 'local');
+    expect(pauseButton().getAttribute('aria-pressed')).toBe('true');
+    onStorage({ postLimitsPausedUntil: { newValue: 0 } }, 'local');
+    expect(pauseButton().getAttribute('aria-pressed')).toBe('false');
+  });
+
+  it('keeps the previous state on a failed write and allows retrying', async () => {
+    vi.useFakeTimers();
     api.storage.local.set.mockRejectedValueOnce(new Error('Storage unavailable'));
-    await leaveInput('20');
-    expect(api.tabs.reload).not.toHaveBeenCalled();
-    expect(status().textContent).toContain('Could not save');
-    expect(status().hidden).toBe(false);
-    expect(input().disabled).toBe(false);
-    await leaveInput('20');
-    expect(api.storage.local.set).toHaveBeenLastCalledWith({ xPostLimit: 20 });
-    expect(api.tabs.reload).toHaveBeenCalledWith(7);
-    expect(status().hidden).toBe(true);
+    pauseButton().click();
+    await vi.advanceTimersByTimeAsync(6000);
+    expect(pauseButton().getAttribute('aria-pressed')).toBe('false');
+    expect(pauseButton().disabled).toBe(false);
+    expect(document.querySelector<HTMLElement>('#pause-error')?.hidden).toBe(false);
+    pauseButton().click();
+    await vi.advanceTimersByTimeAsync(6000);
+    expect(pauseButton().getAttribute('aria-pressed')).toBe('true');
+    expect(document.querySelector<HTMLElement>('#pause-error')?.hidden).toBe(true);
   });
-  it('shows only the controls, hints, and requested footer during normal use', async () => {
-    expect(document.querySelector('header')).toBeNull();
-    expect(document.querySelector('img')).toBeNull();
-    expect(document.querySelector('button')).toBeNull();
-    expect(document.querySelector('.intro')).toBeNull();
-    expect(document.querySelector('footer')?.textContent).toBe('limits saved. resets at midnight');
-    await leaveInput('25');
-    expect(status().hidden).toBe(true);
-    expect(status('instagram').hidden).toBe(true);
-    expect(status().textContent).toBe('');
-  });
-  it('waits for focus to leave the input before saving', async () => {
-    input().focus();
-    input().value = '25';
-    input().dispatchEvent(new Event('input', { bubbles: true }));
-    await settle();
+
+  it('cancels on mouse leave, requires a fresh click on return, and restarts the full delay', async () => {
+    vi.useFakeTimers();
+    pauseButton().click();
+    await vi.advanceTimersByTimeAsync(5999);
+    document.documentElement.dispatchEvent(new MouseEvent('mouseleave'));
+    expect(pauseButton().textContent).toBe('Pause limits for 3 minutes');
+    document.documentElement.dispatchEvent(new MouseEvent('mouseenter'));
+    await vi.advanceTimersByTimeAsync(6000);
     expect(api.storage.local.set).not.toHaveBeenCalled();
-    input('instagram').focus();
-    await settle();
-    expect(api.storage.local.set).toHaveBeenCalledWith({ xPostLimit: 25 });
-    expect(document.activeElement).toBe(input('instagram'));
-  });
-  it('does not save or reload when an unchanged input loses focus', async () => {
-    await leaveInput('42');
+    pauseButton().click();
+    await vi.advanceTimersByTimeAsync(5999);
     expect(api.storage.local.set).not.toHaveBeenCalled();
-    expect(api.tabs.reload).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(pauseButton().getAttribute('aria-pressed')).toBe('true');
   });
-  it('saves the Instagram limit independently when its input loses focus', async () => {
-    api.tabs.query.mockResolvedValue([{ id: 8, url: 'https://www.instagram.com/?variant=following' }]);
-    await leaveInput('25', 'instagram');
-    expect(api.storage.local.set).toHaveBeenCalledExactlyOnceWith({ instagramPostLimit: 25 });
-    expect(input().value).toBe('42');
-    expect(api.tabs.reload).toHaveBeenCalledWith(8);
-    expect(status('instagram').hidden).toBe(true);
+
+  it('keeps counting down when moving between controls within the popup', async () => {
+    vi.useFakeTimers();
+    pauseButton().click();
+    pauseButton().dispatchEvent(new MouseEvent('mouseleave'));
+    document.querySelector('#pause-status')!.dispatchEvent(new MouseEvent('mouseenter'));
+    await vi.advanceTimersByTimeAsync(6000);
+    expect(pauseButton().getAttribute('aria-pressed')).toBe('true');
   });
-  it('saves an Instagram change without reloading the active X tab', async () => {
-    await leaveInput('25', 'instagram');
-    expect(api.storage.local.set).toHaveBeenCalledWith({ instagramPostLimit: 25 });
-    expect(api.tabs.reload).not.toHaveBeenCalled();
+
+  it.each(['blur', 'pagehide'])('cancels pending activation when the popup receives %s', async event => {
+    vi.useFakeTimers();
+    pauseButton().click();
+    await vi.advanceTimersByTimeAsync(5000);
+    window.dispatchEvent(new Event(event));
+    await vi.advanceTimersByTimeAsync(6000);
+    expect(api.storage.local.set).not.toHaveBeenCalled();
   });
-  it('shows a reload error after a successful save', async () => {
-    api.tabs.reload.mockRejectedValueOnce(new Error('Tab unavailable'));
-    await leaveInput('25');
-    expect(api.storage.local.set).toHaveBeenCalledWith({ xPostLimit: 25 });
-    expect(status().hidden).toBe(false);
-    expect(status().textContent).toContain('Reload the feed');
-    expect(input().disabled).toBe(false);
+
+  it('cancels pending activation when the popup becomes hidden', async () => {
+    vi.useFakeTimers();
+    pauseButton().click();
+    const hidden = vi.spyOn(document, 'hidden', 'get').mockReturnValue(true);
+    document.dispatchEvent(new Event('visibilitychange'));
+    hidden.mockRestore();
+    await vi.advanceTimersByTimeAsync(6000);
+    expect(api.storage.local.set).not.toHaveBeenCalled();
+  });
+
+  it('allows canceling the countdown with a second click', async () => {
+    vi.useFakeTimers();
+    pauseButton().click();
+    await vi.advanceTimersByTimeAsync(3000);
+    pauseButton().click();
+    await vi.advanceTimersByTimeAsync(6000);
+    expect(api.storage.local.set).not.toHaveBeenCalled();
+    expect(pauseButton().textContent).toBe('Pause limits for 3 minutes');
+  });
+
+  it('keeps an activated pause when the mouse leaves the popup', async () => {
+    vi.useFakeTimers();
+    pauseButton().click();
+    await vi.advanceTimersByTimeAsync(6000);
+    document.documentElement.dispatchEvent(new MouseEvent('mouseleave'));
+    window.dispatchEvent(new Event('blur'));
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(pauseButton().getAttribute('aria-pressed')).toBe('true');
+    expect(api.storage.local.set).toHaveBeenCalledOnce();
+  });
+
+  it('leaves the toggle disabled if its stored state cannot be loaded', async () => {
+    api.storage.local.get.mockRejectedValueOnce(new Error('Storage unavailable'));
+    await mountPopup();
+    expect(pauseButton().disabled).toBe(true);
+    expect(document.querySelector('#pause-error')?.textContent).toContain('Could not load');
   });
 });

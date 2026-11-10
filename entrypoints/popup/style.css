@@ -1,15 +1,10 @@
 :root { color-scheme: dark; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #eeeae1; background: #171917; }
 * { box-sizing: border-box; }
 body { width: 336px; margin: 0; }
-main { padding: 28px 24px 12px; }
-.site-settings { padding: 16px 0 8px; }
-.site-settings:first-child { padding-top: 0; }
-.site-settings h2 { margin: 0 0 14px; font-size: 16px; font-weight: 600; letter-spacing: -.2px; }
-label { display: block; font-size: 12px; font-weight: 550; margin-bottom: 10px; }
-.number-field { display: flex; align-items: center; gap: 12px; border: 1px solid #4a4e44; border-radius: 10px; background: #20231f; padding: 12px 14px; }
-.number-field:focus-within { outline: 2px solid #cfdaae; outline-offset: 3px; }
-input { width: 115px; min-width: 0; border: 0; background: transparent; color: inherit; font: inherit; font-size: 36px; font-weight: 500; line-height: 1.2; outline: none; }
-.number-field span { color: #a6aa9f; font-size: 12px; white-space: nowrap; }
+main { padding: 24px; }
 .hint { margin: 10px 0 14px; color: #8e9586; font-size: 11px; }
-.site-settings [role="status"] { margin: 10px 0 0; color: #ffb9a9; font-size: 11px; line-height: 1.5; }
-footer { padding: 16px 24px 20px; color: #8e9586; font-size: 10px; letter-spacing: .4px; }
+.limit-pause button { width: 100%; padding: 12px 14px; border: 1px solid #4a4e44; border-radius: 10px; background: #20231f; color: inherit; font: inherit; font-size: 13px; cursor: pointer; }
+.limit-pause button[aria-pressed="true"] { border-color: #cfdaae; background: #303629; }
+.limit-pause button:focus-visible { outline: 2px solid #cfdaae; outline-offset: 3px; }
+.limit-pause button:disabled { opacity: .6; cursor: default; }
+#pause-error { margin: 10px 0 0; color: #ffb9a9; font-size: 11px; line-height: 1.5; }

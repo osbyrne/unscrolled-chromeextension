@@ -3,32 +3,16 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Daily limits</title>
+    <title>Feed blocking</title>
     <script type="module" src="./main.ts"></script>
   </head>
   <body>
     <main>
-      <form class="site-settings" data-site="x">
-        <h2>X.com</h2>
-        <label for="x-post-limit">Daily post limit</label>
-        <div class="number-field">
-          <input id="x-post-limit" name="xPostLimit" type="number" min="1" max="50" step="1" required inputmode="numeric" disabled />
-          <span>posts / day</span>
-        </div>
-        <p class="hint">Choose 1–50 posts. Resets at midnight.</p>
-        <p role="status" aria-live="polite" hidden></p>
-      </form>
-      <form class="site-settings" data-site="instagram">
-        <h2>Instagram</h2>
-        <label for="instagram-post-limit">Daily post limit</label>
-        <div class="number-field">
-          <input id="instagram-post-limit" name="instagramPostLimit" type="number" min="1" max="50" step="1" required inputmode="numeric" disabled />
-          <span>posts / day</span>
-        </div>
-        <p class="hint">Choose 1–50 posts. Resets at midnight.</p>
-        <p role="status" aria-live="polite" hidden></p>
-      </form>
+      <section class="limit-pause" aria-label="Pause post limits">
+        <button id="pause-limits" type="button" aria-pressed="false" aria-describedby="pause-status" disabled>Pause limits for 3 minutes</button>
+        <p id="pause-status" class="hint" role="status">Applies to X and Instagram.</p>
+        <p id="pause-error" role="alert" hidden></p>
+      </section>
     </main>
-    <footer>limits saved. resets at midnight</footer>
   </body>
 </html>

@@ -2,9 +2,9 @@
 
 # Unscrolled
 
-A Chrome extension that limits your X and Instagram Following feeds so you can stop scrolling and focus. Set a separate limit of **1 to 50 posts per day** for each feed (50 by default). Each feed has its own daily counter.
+A Chrome extension that blocks posts in X's main column and Instagram's Following feed from the first post. Use a deliberate three-minute pause when you need feed access.
 
-> you've seen 50 posts, it's time to focus now.
+> it's time to focus now.
 
 ## Install locally
 
@@ -19,21 +19,21 @@ bun run build
 2. Choose **Load unpacked**, then select `.output/chrome-mv3` from this project.
 3. Open or reload X.com.
 
-## Choose your limit
+## Pause blocking
 
-Click the extension icon to set separate whole-number limits from **1 to 50** for X and Instagram. Each limit saves when you leave its input. Saving reloads that feed when it is the active tab, and changing a limit preserves today's count. The feed's footer message and counter match that platform's limit.
+Click **Pause limits for 3 minutes** in the popup, then keep the mouse inside the popup for six seconds. Leaving the popup or closing it during the countdown cancels activation. You can also click **Cancel pause** during the countdown.
 
-Each setting persists across browser restarts and applies to future visits in all tabs for that platform. Other open feed tabs pick up limit changes automatically. If an older shared limit was saved, it is used for both platforms the first time, capped at 50, until each platform gets its own setting.
+After activation, posts become available in all open X and Instagram Following tabs. The popup shows the time remaining. Click **Resume limits now** to block posts again immediately. Blocking resumes automatically after three minutes, even if you close the popup, reload a feed, or restart the browser. Instagram's redirects remain active.
 
 ## How it works
 
-The extension admits the first configured number of distinct post IDs in X's main column. Posts loaded ahead of your scroll position reserve a place in that allowance. Repeated posts count once; quoted posts belong to their containing post. After the limit, the remaining timeline cells are hidden and replaced with the focus footer. Previously admitted posts remain available when scrolling back.
+The extension marks each feed container as blocked. CSS hides its contents, including newly loaded posts, and a focus message appears beside the container. A DOM observer discovers new or replacement feed containers and ignores updates inside feeds that are already blocked. The footer lives outside the measured list in a clipped wrapper, preserving row dimensions and keeping the message stable across feed updates.
 
-The allowance is shared across tabs on the same platform and persists across reloads, new tabs, and browser restarts. X and Instagram have separate counters. Admitted post IDs are stored locally so repeats count once. Each counter resets every day at midnight in your computer's local timezone, including in open tabs. After sleep or a browser restart, the first use checks the date before granting posts. Changing a limit preserves that platform's usage for the day. Neither platform can show more than 50 counted posts per day.
+Feeds stay blocked while the saved pause is loading or if storage cannot be read. They open only after the extension confirms an active pause.
 
-A DOM observer handles dynamically loaded posts and recycled timeline cells. The footer lives outside the measured list in a clipped wrapper. Hidden rows keep their original dimensions, and the same footer stays mounted across feed updates, preventing layout feedback and scroll jitter. X may still fetch posts in the background; this extension hides them rather than intercepting network requests. It relies on X's current post markup (`primaryColumn`, `tweet`, `cellInnerDiv`, and timestamp permalinks), which may need updating if X changes its layout.
+X may still fetch posts in the background. The extension hides them rather than intercepting network requests. It relies on X's current post markup (`primaryColumn`, `tweet`, and `cellInnerDiv`), which may need updating if X changes its layout. X's post history at `/i/history` remains accessible.
 
-No account access, analytics, or remote services. A background service worker serializes admissions across tabs so concurrent updates cannot exceed each platform's daily limit. The `storage` permission stores the two limits and daily post IDs locally; `alarms` schedules the midnight reset; `activeTab` lets the popup identify and reload the active feed when you save. Instagram host access and `declarativeNetRequest` handle its redirects, and `webNavigation` catches in-app navigation to the home page. The content script runs only on X and Instagram pages.
+No account access, analytics, or remote services. The `storage` permission keeps the pause expiry locally and shares it across tabs. Instagram host access and `declarativeNetRequest` handle its redirects, and `webNavigation` catches in-app navigation to the home page. The content script runs only on X and Instagram pages.
 
 ## Development
 
@@ -55,13 +55,6 @@ Instagram's home page redirects to `https://www.instagram.com/?variant=following
 Direct, profiles, individual posts, and other URLs remain accessible. Redirects also
 apply during Instagram's in-app navigation.
 
-The Following feed uses Instagram's separate daily limit (50 by default), with its own
-counter independent of X. Distinct posts loaded into the feed reserve a place;
-repeat posts count once. The counter persists across tabs and browser restarts,
-resets at local midnight, and shows the stopping footer once the limit is reached.
-Other Instagram pages are not limited. Detection relies on Instagram's `main article`
-markup and post permalinks, so layout changes may require an update.
-
-The extension now also requests Instagram host access and `declarativeNetRequest`
-for page-load redirects. After rebuilding, reload the extension at
-`chrome://extensions` and reload Instagram to enable the new content script.
+The Following feed blocks every post by default and shares the three-minute pause with X.
+Other Instagram pages are not blocked. Detection relies on Instagram's `main article`
+markup, so layout changes may require an update.

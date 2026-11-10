@@ -1,9 +1,7 @@
-import { DEFAULT_POST_LIMIT, footerMessage } from './settings';
 import logoUrl from '../assets/logo.webp?inline';
 
-export const POST_LIMIT = DEFAULT_POST_LIMIT;
-export const MESSAGE = footerMessage(POST_LIMIT);
-const HIDDEN = 'data-unscrolled-hidden';
+export const MESSAGE = "it's time to focus now.";
+const BLOCKED = 'data-unscrolled-blocked';
 const FOOTER = 'data-unscrolled-footer';
 const WRAPPER = 'data-unscrolled-boundary';
 
@@ -11,39 +9,32 @@ interface Boundary {
   timeline: HTMLElement;
   wrapper: HTMLElement;
   footer: HTMLElement;
-  cutoff: number;
-  anchor: HTMLElement;
-  anchorHref: string | null;
-  appliedClip: string;
-  clipCutoff: number;
-  originalClip: string;
-  originalClipPriority: string;
 }
 
 /** Keep feed virtualizer measurements intact; only clip its painted output. */
-export function startLimiter(doc: Document, limit = POST_LIMIT, authorize?: (ids: string[]) => Promise<string[]>, instagramId?: (article: Element) => string | undefined): () => void {
-  const postHref = (article: Element) => instagramId
-    ? instagramId(article) ?? null
-    : article.querySelector('time')?.closest('a')?.getAttribute('href') ?? null;
+export function startLimiter(doc: Document, site: 'x' | 'instagram' = 'x'): () => void {
   const win = doc.defaultView!;
-  const admitted = new Set<string>();
-  const checked = new Set<string>();
-  let requesting = false;
-  let retryTimer: ReturnType<typeof setTimeout> | undefined;
+  const scope = site === 'instagram' ? 'main' : '[data-testid="primaryColumn"]';
+  const containers = site === 'instagram'
+    ? [':has(> article)']
+    : [':has(> [data-testid="cellInnerDiv"] article[data-testid="tweet"])',
+       ':not([data-testid="cellInnerDiv"]):has(> article[data-testid="tweet"])'];
+  const selector = containers.map(container => `${scope}${container}, ${scope} ${container}`).join(', ');
   const boundaries = new Map<HTMLElement, Boundary>();
   const style = doc.createElement('style');
   style.textContent = `
-    [${HIDDEN}] { visibility: hidden !important; pointer-events: none !important; }
+    [${BLOCKED}], [${BLOCKED}] * { visibility: hidden !important; pointer-events: none !important; }
+    [${BLOCKED}] { clip-path: inset(0px 0px 100% 0px) !important; }
     [${WRAPPER}] { display: block !important; position: relative !important;
       overflow: clip !important; overflow-anchor: none; flex-shrink: 0; min-width: 0; }
-    [${FOOTER}] { position: absolute !important; inset-inline: 0 !important;
+    [${FOOTER}] { position: absolute !important; inset-inline: 0 !important; top: 0 !important;
       box-sizing: border-box !important; display: block !important;
       margin: 0 !important; padding: 24px !important;
       text-align: center !important; z-index: 1; border-top: 1px solid #8884;
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       overflow-anchor: none; }
     [${FOOTER}] .unscrolled-panel { box-sizing: border-box; padding: 36px 24px;
-      border: 2px solid currentColor; border-radius: 0; background: inherit; }
+      border: 0; background: inherit; }
     [${FOOTER}] .unscrolled-logo { display: block; width: 144px; height: 192px;
       max-width: 100%; object-fit: contain; margin: 0 auto 24px; }
     [${FOOTER}] h2 { margin: 0 0 18px; color: inherit; font: inherit;
@@ -61,12 +52,13 @@ export function startLimiter(doc: Document, limit = POST_LIMIT, authorize?: (ids
     return win.matchMedia('(prefers-color-scheme: dark)').matches ? '#000' : '#fff';
   }
 
-  function createBoundary(timeline: HTMLElement, anchor: HTMLElement): Boundary {
+  function createBoundary(timeline: HTMLElement): Boundary {
     const wrapper = doc.createElement('div');
     wrapper.setAttribute(WRAPPER, '');
     // Never insert our footer among React's measured/recycled list children.
     timeline.before(wrapper);
     wrapper.append(timeline);
+    timeline.setAttribute(BLOCKED, '');
     const footer = doc.createElement('footer');
     footer.setAttribute(FOOTER, '');
     footer.setAttribute('role', 'status');
@@ -83,51 +75,28 @@ export function startLimiter(doc: Document, limit = POST_LIMIT, authorize?: (ids
     const heading = doc.createElement('h2');
     heading.textContent = 'End of scrolling.';
     const message = doc.createElement('p');
-    message.textContent = footerMessage(limit);
+    message.textContent = MESSAGE;
     panel.append(logo, heading, message);
     footer.append(panel);
     wrapper.append(footer);
-    const state: Boundary = {
-      timeline, wrapper, footer, anchor, cutoff: 0,
-      anchorHref: postHref(anchor),
-      appliedClip: '', clipCutoff: -1,
-      originalClip: timeline.style.getPropertyValue('clip-path'),
-      originalClipPriority: timeline.style.getPropertyPriority('clip-path'),
-    };
+    const state: Boundary = { timeline, wrapper, footer };
     boundaries.set(timeline, state);
     resizeObserver.observe(footer);
-    resizeObserver.observe(timeline);
-    updateBoundary(state, true);
+    updateBoundary(state);
     return state;
   }
 
-  function updateBoundary(state: Boundary, measure = false) {
-    const { timeline, wrapper, footer, anchor } = state;
-    // Pin the cutoff when the first rejected row is recycled. Later rows must
-    // never move the footer further down and reopen the scrolling allowance.
-    if (measure && anchor.isConnected && anchor.parentElement === timeline &&
-      postHref(anchor) === state.anchorHref) {
-      state.cutoff = Math.max(0, anchor.getBoundingClientRect().top - timeline.getBoundingClientRect().top);
-    }
-    const cutoff = `${state.cutoff}px`;
-    const clip = `inset(0px 0px max(0px, calc(100% - ${cutoff})) 0px)`;
-    if (state.clipCutoff !== state.cutoff || timeline.style.clipPath !== state.appliedClip) {
-      timeline.style.setProperty('clip-path', clip, 'important');
-      // Browsers normalize calc()/inset() strings; compare the serialized value.
-      state.appliedClip = timeline.style.clipPath;
-      state.clipCutoff = state.cutoff;
-    }
-    if (footer.style.top !== cutoff) footer.style.top = cutoff;
+  function updateBoundary(state: Boundary) {
+    const { wrapper, footer } = state;
     // The list retains its full intrinsic height and every row retains its
     // dimensions. Only the outer wrapper sets the page's native scroll end.
-    const height = `${state.cutoff + footer.getBoundingClientRect().height}px`;
+    const height = `${footer.getBoundingClientRect().height}px`;
     if (wrapper.style.height !== height) wrapper.style.height = height;
   }
 
   function restore(state: Boundary) {
     resizeObserver.unobserve(state.footer);
-    resizeObserver.unobserve(state.timeline);
-    state.timeline.style.setProperty('clip-path', state.originalClip, state.originalClipPriority);
+    state.timeline.removeAttribute(BLOCKED);
     state.footer.remove();
     state.wrapper.replaceWith(...state.wrapper.childNodes);
   }
@@ -139,73 +108,28 @@ export function startLimiter(doc: Document, limit = POST_LIMIT, authorize?: (ids
     for (const [timeline, state] of boundaries) {
       if (!timeline.isConnected) { restore(state); boundaries.delete(timeline); }
     }
-    const rejected = new Map<HTMLElement, HTMLElement>();
-    const hidden = new Set<Element>();
-    const articles = doc.querySelectorAll<HTMLElement>(
-      instagramId ? 'main article' : '[data-testid="primaryColumn"] article[data-testid="tweet"]',
-    );
-    const candidates = new Set<string>();
-    for (const article of articles) {
-      const href = article.querySelector('time')?.closest('a')?.getAttribute('href');
-      const id = instagramId ? instagramId(article) : href?.match(/\/status\/(\d+)/)?.[1];
-      if (!id) continue;
-      const cell = instagramId ? article : article.closest<HTMLElement>('[data-testid="cellInnerDiv"]') ?? article;
-      const timeline = cell.parentElement;
-      if (!timeline) continue;
-      if (!authorize && !admitted.has(id) && admitted.size < limit) admitted.add(id);
-      if (authorize && !checked.has(id)) {
-        candidates.add(id);
-        hidden.add(cell);
-        continue;
-      }
-      if (!admitted.has(id)) {
-        hidden.add(cell);
-        if (!rejected.has(timeline)) rejected.set(timeline, cell);
-      }
+    for (const timeline of doc.querySelectorAll<HTMLElement>(selector)) {
+      if (!timeline.closest(`[${BLOCKED}]`)) createBoundary(timeline);
     }
-    if (authorize && candidates.size && !requesting) {
-      requesting = true;
-      const batch = [...candidates];
-      void authorize(batch).then(ids => {
-        if (stopped) return;
-        for (const id of ids) admitted.add(id);
-        for (const id of batch) checked.add(id);
-        requesting = false;
-        scan();
-      }).catch(() => {
-        requesting = false;
-        if (!stopped) retryTimer = setTimeout(scan, 1000);
-      });
-    }
-    // Diff attributes instead of unhiding and rehiding all rows on every scan.
-    for (const node of doc.querySelectorAll(`[${HIDDEN}]`)) {
-      if (!hidden.has(node)) node.removeAttribute(HIDDEN);
-    }
-    for (const node of hidden) if (!node.hasAttribute(HIDDEN)) node.setAttribute(HIDDEN, '');
-    for (const [timeline, anchor] of rejected) {
-      if (!boundaries.has(timeline)) createBoundary(timeline, anchor);
-    }
-    for (const state of boundaries.values()) updateBoundary(state);
     observer.observe(doc, { childList: true, subtree: true, attributes: true,
-      attributeFilter: ['href', 'data-testid'] });
+      attributeFilter: ['data-testid'] });
   };
-  const observer = new win.MutationObserver(() => {
+  const observer = new win.MutationObserver(records => {
     if (queued) return;
+    if (records.every(record => record.target instanceof win.Element && record.target.closest(`[${BLOCKED}]`))) return;
     queued = true;
     queueMicrotask(() => { queued = false; scan(); });
   });
   const resizeObserver = new win.ResizeObserver(() => {
-    if (!stopped) for (const state of boundaries.values()) updateBoundary(state, true);
+    if (!stopped) for (const state of boundaries.values()) updateBoundary(state);
   });
   scan();
   return () => {
     stopped = true;
-    clearTimeout(retryTimer);
     observer.disconnect();
     resizeObserver.disconnect();
     for (const state of boundaries.values()) restore(state);
     boundaries.clear();
     style.remove();
-    for (const node of doc.querySelectorAll(`[${HIDDEN}]`)) node.removeAttribute(HIDDEN);
   };
 }
