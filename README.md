@@ -33,7 +33,7 @@ Feeds stay blocked while the saved pause is loading or if storage cannot be read
 
 X may still fetch posts in the background. The extension hides them rather than intercepting network requests. It relies on X's current post markup (`primaryColumn`, `tweet`, and `cellInnerDiv`), which may need updating if X changes its layout. X's post history at `/i/history` remains accessible.
 
-No account access, analytics, or remote services. The `storage` permission keeps the pause expiry locally and shares it across tabs. Instagram host access and `declarativeNetRequest` handle its redirects, and `webNavigation` catches in-app navigation to the home page. The content script runs only on X and Instagram pages.
+No account access, analytics, or remote services. The `storage` permission keeps the pause expiry locally and shares it across tabs. Instagram host access and `declarativeNetRequestWithHostAccess` handle page-load redirects. The content script handles in-app navigation and runs only on X and Instagram pages.
 
 ## Development
 

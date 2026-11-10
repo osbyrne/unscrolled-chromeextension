@@ -43,7 +43,12 @@ export default defineContentScript({
       if (area === 'local' && changes[LIMIT_PAUSE_KEY]) void restart();
     };
     browser.storage.onChanged.addListener(onStorage);
-    ctx.addEventListener(window, 'wxt:locationchange', () => { void restart(); });
+    ctx.addEventListener(window, 'wxt:locationchange', event => {
+      // WXT can report navigation before location.href changes.
+      ctx.setTimeout(() => {
+        if (location.href === event.newUrl.href) void restart();
+      }, 0);
+    });
     ctx.addEventListener(document, 'visibilitychange', () => {
       if (!document.hidden && pausedUntil > 0 && pausedUntil <= Date.now()) void restart();
     });

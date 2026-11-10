@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 interface TestContext {
   isInvalid: boolean;
   addEventListener: (target: EventTarget, event: string, listener: EventListener) => void;
+  setTimeout: (callback: () => void, delay: number) => ReturnType<typeof setTimeout>;
   onInvalidated: (callback: () => void) => void;
 }
 const entrypoint = vi.hoisted(() => ({ main: async (_ctx: TestContext) => {} }));
@@ -22,6 +23,11 @@ let saved: Record<string, unknown>;
 let context: TestContext;
 let invalidate: () => void;
 let events: AbortController;
+const replace = vi.fn();
+const setLocation = (url: string) => vi.stubGlobal('location', Object.assign(new URL(url), { replace }));
+const locationChange = (url = location.href) => {
+  window.dispatchEvent(Object.assign(new Event('wxt:locationchange'), { newUrl: new URL(url), oldUrl: new URL(location.href) }));
+};
 const flush = () => vi.advanceTimersByTimeAsync(0);
 const visible = () => [...document.querySelectorAll('article')].filter(node => getComputedStyle(node).visibility !== 'hidden');
 const changePause = async (until: number) => {
@@ -30,7 +36,7 @@ const changePause = async (until: number) => {
   await flush();
 };
 const mount = async (instagram = false) => {
-  vi.stubGlobal('location', new URL(instagram ? 'https://www.instagram.com/?variant=following' : 'https://x.com/home'));
+  setLocation(instagram ? 'https://www.instagram.com/?variant=following' : 'https://x.com/home');
   document.body.innerHTML = instagram
     ? '<main><div>' + [1, 2, 3].map(id => `<article><a href="/p/${id}/"><time>now</time></a></article>`).join('') + '</div></main>'
     : '<main data-testid="primaryColumn"><div>' + [1, 2, 3].map(id =>
@@ -49,6 +55,11 @@ beforeEach(async () => {
   context = {
     isInvalid: false,
     addEventListener: (target, event, listener) => target.addEventListener(event, listener, { signal: events.signal }),
+    setTimeout: (callback, delay) => {
+      const timer = setTimeout(callback, delay);
+      events.signal.addEventListener('abort', () => clearTimeout(timer), { once: true });
+      return timer;
+    },
     onInvalidated: callback => { invalidate = callback; },
   };
   api.storage.local.get.mockImplementation(async () => ({ ...saved }));
@@ -104,7 +115,7 @@ describe('temporary post limit pause', () => {
     saved.postLimitsPausedUntil = Date.now() + 60_000;
     await mount();
     expect(visible()).toHaveLength(3);
-    window.dispatchEvent(new Event('wxt:locationchange'));
+    locationChange();
     await flush();
     await vi.advanceTimersByTimeAsync(60_000);
     expect(visible()).toHaveLength(0);
@@ -138,14 +149,49 @@ describe('temporary post limit pause', () => {
     [true, 'https://www.instagram.com/direct/', 'https://www.instagram.com/?variant=following'],
   ])('restores excluded routes and blocks again when returning (Instagram: %s)', async (instagram, excluded, feed) => {
     await mount(instagram);
-    vi.stubGlobal('location', new URL(excluded));
-    window.dispatchEvent(new Event('wxt:locationchange'));
+    locationChange(excluded);
+    setLocation(excluded);
     await flush();
     expect(visible()).toHaveLength(3);
     expect(document.querySelector('footer')).toBeNull();
-    vi.stubGlobal('location', new URL(feed));
-    window.dispatchEvent(new Event('wxt:locationchange'));
+    locationChange(feed);
+    setLocation(feed);
     await flush();
     expect(visible()).toHaveLength(0);
+  });
+});
+
+describe('Instagram in-app redirects', () => {
+  it.each([
+    ['https://www.instagram.com/', 'https://www.instagram.com/?variant=following'],
+    ['https://www.instagram.com/?variant=home', 'https://www.instagram.com/?variant=following'],
+    ['https://www.instagram.com/reels/abc/', 'https://www.instagram.com/direct/'],
+  ])('redirects %s after the destination URL commits', async (url, destination) => {
+    await mount(true);
+    locationChange(url);
+    expect(replace).not.toHaveBeenCalled();
+    setLocation(url);
+    await flush();
+    expect(replace).toHaveBeenCalledExactlyOnceWith(destination);
+  });
+
+  it('does not redirect a canceled route change', async () => {
+    await mount(true);
+    locationChange('https://www.instagram.com/reels/abc/');
+    await flush();
+    expect(replace).not.toHaveBeenCalled();
+    expect(visible()).toHaveLength(0);
+  });
+
+  it('does not run a queued redirect after the content script is invalidated', async () => {
+    await mount(true);
+    const url = 'https://www.instagram.com/reels/abc/';
+    locationChange(url);
+    setLocation(url);
+    context.isInvalid = true;
+    invalidate();
+    events.abort();
+    await flush();
+    expect(replace).not.toHaveBeenCalled();
   });
 });

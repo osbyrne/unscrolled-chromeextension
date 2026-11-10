@@ -3,7 +3,7 @@ import { defineConfig } from 'wxt';
 export default defineConfig({
   manifest: {
     name: 'Unscrolled — scroll less, focus more',
-    permissions: ['storage', 'declarativeNetRequest', 'webNavigation'],
+    permissions: ['storage', 'declarativeNetRequestWithHostAccess'],
     host_permissions: ['*://instagram.com/*', '*://www.instagram.com/*'],
     declarative_net_request: { rule_resources: [{ id: 'instagram', enabled: true, path: 'rules/instagram.json' }] },
     description: 'Block X and Instagram feeds by default, with a deliberate three-minute pause when you need it.',
